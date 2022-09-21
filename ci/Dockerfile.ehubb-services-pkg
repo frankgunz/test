@@ -1,0 +1,53 @@
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND noninteractive
+
+ENV NFPM_VERSION 2.11.3
+
+ARG PKG_RELEASE=1
+
+RUN mkdir /source
+
+WORKDIR /source
+
+RUN apt-get update && apt-get install curl wget tree dos2unix -y
+
+RUN apt-get clean && apt-get autoremove && rm -rf /var/lib/apt/lists/* /opt/bootstrap/install-/* /var/opt/bootstrap/install-/*
+
+RUN wget https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz -O /tmp/nfpm.tar.gz
+
+RUN tar -xvf /tmp/nfpm.tar.gz -C /usr/local/bin/ nfpm
+
+RUN nfpm --version
+
+COPY . /source
+
+RUN mkdir -vp output pkg-input/lib/EnterpriseHubb/Services pkg-input/usr/share/EnterpriseHubb/Services/sites pkg-input/lib/systemd/system  
+
+RUN mv -v artifact-download/* pkg-input/lib/EnterpriseHubb/Services
+
+RUN find pkg-input/lib/EnterpriseHubb/Services -type f -name "*Development.log.json" -name "*.pdb" -print -delete
+
+RUN cp -rv packaging/*.service pkg-input/lib/systemd/system/
+
+RUN cp -rv packaging/*.site.conf pkg-input/usr/share/EnterpriseHubb/Services/sites
+
+RUN cp -rv packaging/scripts/ pkg-input/
+
+RUN dos2unix pkg-input/scripts/postinstall.sh pkg-input/scripts/postremove.sh pkg-input/scripts/preinstall.sh pkg-input/scripts/preremove.sh
+
+RUN dos2unix pkg-input/lib/systemd/system/*.service
+ 
+RUN chown root:root -R pkg-input/ && chmod 0644 -R pkg-input/
+
+RUN chmod 0755 -R pkg-input/scripts/*.sh
+
+RUN mv packaging/nfpm-hubbell-enterprisehubb-services.yaml pkg-input/nfpm.yaml
+
+RUN sed -i 's/^release:.*/release: ${PKG_RELEASE}/g' pkg-input/nfpm.yaml
+
+RUN mkdir -vp output/ && mkdir -vp output/packaging/ 
+
+RUN cp -rv ./packaging/. output/packaging
+
+RUN cd pkg-input && nfpm pkg --packager deb -t ../output/

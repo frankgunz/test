@@ -1,0 +1,18 @@
+[Unit]
+Description=EnterpriseHubb TpGateway Daemon
+
+[Service]
+WorkingDirectory=/usr/lib/EnterpriseHubb/Services
+ExecStart=/usr/bin/dotnet /usr/lib/EnterpriseHubb/Services/Hubbell.EHubb.TpGatewayAPI.dll
+Restart=always
+RestartSec=30
+SyslogIdentifier=EHubb-TpGateway
+LogNamespace=EHubb-TpGateway
+StandardOutput=journal
+StandardError=journal
+User=root
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_PRINT_TELEMETRY_MESSAGE=false
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,69 @@
+# Name. (required)
+name: hubbell-enterprisehubb-services
+
+# Architecture. (required)
+arch: amd64
+
+# Platform.
+platform: linux
+
+# Version. (required)
+# This will expand any env var you set in the field, eg version: v${SEMVER}
+version: v1.0.0
+
+# Version Epoch.
+# Default is extracted from `version` if it is semver compatible.
+epoch: 2
+
+# Version Release.
+# This will expand any env var you set in the field, eg release: ${VERSION_RELEASE}
+release: 1
+
+# Section.
+section: default
+
+# Priority.
+priority: extra
+
+# Maintaner.
+maintainer: Hubbell Inc.
+
+# Description.
+# Defaults to `no description given`.
+description: Hubbell Inc. EnterpriseHubb Services
+
+# Vendor.
+vendor: Hubbell Inc.
+
+# Package's homepage.
+homepage: https://www.hubbell.com/
+
+# License.
+license: Proprietary
+
+# Disables globbing for files, config_files, etc.
+disable_globbing: false
+
+# Dependencies. (overridable)
+depends:
+  - dotnet-runtime-5.0
+
+# Instllation script actions.
+scripts:
+  preinstall: ./scripts/preinstall.sh
+  postinstall: ./scripts/postinstall.sh
+  preremove: ./scripts/preremove.sh
+  postremove: ./scripts/postremove.sh
+
+# Contents to add to the package
+contents:
+  - src: ./lib/EnterpriseHubb/Services/*.dll
+    dst: /lib/EnterpriseHubb/Services/
+  - src: ./lib/EnterpriseHubb/Services/*.json
+    dst: /lib/EnterpriseHubb/Services/
+  - src: ./lib/EnterpriseHubb/Services/**/*
+    dst: /lib/EnterpriseHubb/Services/
+  - src: ./lib/systemd/system/*.service
+    dst: /lib/systemd/system/
+  - src: ./usr/share/EnterpriseHubb/Services/sites/enterprisehubb.*.site.conf
+    dst: /usr/share/EnterpriseHubb/Services/sites

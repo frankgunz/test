@@ -1,0 +1,37 @@
+FROM ubuntu:20.04
+
+ARG DOTNET_SDK_VER=6.0
+
+ARG BUILD_MODE=Debug
+
+ARG BUILD_PROJ=DEFAULT
+
+ARG BUILD_RUNTIME=linux-x64
+
+ENV DEBIAN_FRONTEND noninteractive
+
+ENV DOTNET_CLI_TELEMETRY_OPTOUT true
+
+RUN mkdir /source
+
+WORKDIR /source
+
+RUN apt-get update && apt-get upgrade -y && apt-get install apt-utils git file make wget curl unzip apt-transport-https ca-certificates -y
+
+RUN . /etc/os-release && wget -q https://packages.microsoft.com/config/ubuntu/$VERSION_ID/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+
+RUN dpkg -i packages-microsoft-prod.deb && apt-get update && rm -f packages-microsoft-prod.deb
+
+RUN apt-get install dotnet-sdk-$DOTNET_SDK_VER -y
+
+RUN apt-get clean && apt-get autoremove && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+COPY . /source
+
+RUN mkdir -p /source/output /source/results
+
+RUN dotnet clean $BUILD_PROJ.csproj --nologo
+
+RUN dotnet test $BUILD_PROJ.csproj --nologo -c $BUILD_MODE -r $BUILD_RUNTIME --logger "trx;LogFileName=TestResults.trx" -o /source/output
+
+RUN find /source -name '*.trx' -exec mv -v -t /source/results {} +

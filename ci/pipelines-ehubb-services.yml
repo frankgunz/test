@@ -1,0 +1,237 @@
+trigger:  
+  branches:
+    include:
+    - master
+    - develop
+    - release-*
+
+variables:
+  BUILT_1: 'EnterpriseHubb-Services-debug_$(Build.SourceBranchName)_$(Build.BuildId)_$(Build.BuildNumber)'
+  BUILT_2: 'EnterpriseHubb-Services-release_$(Build.SourceBranchName)_$(Build.BuildId)_$(Build.BuildNumber)'
+  BUILT_3: 'EnterpriseHubb-Services-Package-release_$(Build.SourceBranchName)_$(Build.BuildId)_$(Build.BuildNumber)'
+  TEST_1: 'EnterpriseHubb-Services-Test_$(Build.SourceBranchName)_$(Build.BuildId)_$(Build.BuildNumber)'
+
+stages:
+- stage: build_ehubb_services
+  jobs:
+  - job: build_ehubb_services_debug
+    pool:
+      name: 'DevOps_Austin'
+      demands:
+      - docker
+      - agent.os -equals Linux
+    steps:
+    - script: |
+       docker build --build-arg BUILD_MODE=Debug --build-arg BUILD_SLN=src/Hubbell.EHubb.Services \
+                    -t ehubb-services:$(Build.BuildNumber) -f ci/Dockerfile.ehubb-services .
+      displayName: Build code in docker
+    - script: docker create ehubb-services:$(Build.BuildNumber) > ehubb-services.cid && cat ehubb-services.cid
+      displayName: Extract container ID
+    - script: mkdir build-output
+      displayName: Create output directory to local disk
+    - script: docker cp $(cat ehubb-services.cid):/source/output/. build-output
+      displayName: Copy build artifacts to output directory
+    - script: du build-output -h
+      displayName: Display size of produced artifacts
+    - script: echo "$(git rev-parse --verify HEAD --short=7)" > build-output/gitbuild.info
+      displayName: Inject git hash into output directory
+    - task: PublishBuildArtifacts@1
+      displayName: Upload artifacts
+      inputs:
+        pathtoPublish: build-output
+        Parallel: true
+        ParallelCount: 8
+        artifactName: '$(BUILT_1)'
+  - job: build_ehubb_services_release
+    timeoutInMinutes: 120
+    pool:
+      name: 'DevOps_Austin'
+      demands:
+      - docker
+      - agent.os -equals Linux
+    steps:
+    - script: |
+       docker build --build-arg BUILD_MODE=Release --build-arg BUILD_SLN=src/Hubbell.EHubb.Services --build-arg BUILD_EXTRA_FLAGS="-p:PublishedTrimmed=True -p:TrimMode=CopyUsed" \
+                    -t ehubb-services:$(Build.BuildNumber) -f ci/Dockerfile.ehubb-services .
+      displayName: Build code in docker
+    - script: docker create ehubb-services:$(Build.BuildNumber) > ehubb-services.cid && cat ehubb-services.cid
+      displayName: Extract container ID
+    - script: mkdir build-output
+      displayName: Create output directory to local disk
+    - script: docker cp $(cat ehubb-services.cid):/source/output/. build-output
+      displayName: Copy build artifacts to output directory
+    - script: du build-output -h
+      displayName: Display size of produced artifacts
+    - script: echo "$(git rev-parse --verify HEAD --short=7)" > build-output/gitbuild.info
+      displayName: Inject git hash into output directory
+    - task: PublishBuildArtifacts@1
+      displayName: Upload artifacts
+      inputs:
+        pathtoPublish: build-output
+        Parallel: true
+        ParallelCount: 8
+        artifactName: '$(BUILT_2)'
+  - job: build_package_ehubb_services_release
+    displayName: build_package_ehubb_services_release
+    dependsOn: build_ehubb_services_release
+    pool:
+      name: 'DevOps_Austin'
+      demands:
+      - docker
+      - agent.os -equals Linux
+    steps:
+    - task: DownloadBuildArtifacts@0
+      displayName: Download built artifacts
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: '$(BUILT_2)'
+        downloadPath: './'
+    - script: mv $(BUILT_2) artifact-download
+      displayName: Rename downloaded artifact directory
+    - script: docker build --build-arg PKG_RELEASE=$(Build.BuildNumber) -t ehubb-services-pkg:$(Build.BuildNumber) -f ci/Dockerfile.ehubb-services-pkg .
+      displayName: Package code in docker
+    - script: docker create ehubb-services-pkg:$(Build.BuildNumber) > ehubb-services-pkg.cid && cat ehubb-services-pkg.cid
+      displayName: Extract container ID
+    - script: mkdir pkg-output
+      displayName: Create output directory to local disk
+    - script: docker cp $(cat ehubb-services-pkg.cid):/source/output/. pkg-output 
+      displayName: Copy build artifacts to output directory
+    - task: PublishBuildArtifacts@1
+      displayName: Upload artifacts
+      inputs:
+        pathtoPublish: pkg-output
+        Parallel: true
+        ParallelCount: 8
+        artifactName: $(BUILT_3)
+
+- stage: scan_ehubb_services
+  condition: false
+  jobs:
+  - job: scan_sonarcloud_ehubb_services
+    displayName: scan_sonarcloud_ehubb_services
+    timeoutInMinutes: 120
+    pool:
+     vmImage: 'ubuntu-latest'
+    steps:
+    - task: SonarCloudPrepare@1
+      inputs:
+        SonarCloud: 'SonarCloudHCS'
+        organization: 'hubbell'
+        scannerMode: 'CLI'
+        configMode: 'manual'
+        cliProjectKey: 'hubbell_EHubbServices'
+        cliProjectName: 'EHubbServices'
+        cliSources: '.'
+      displayName: Prepare SonarCloud anaylsis
+    - task: SonarCloudAnalyze@1
+      displayName: Run SonarCloud anaylsis
+    - task: SonarCloudPublish@1
+      inputs:
+        pollingTimeoutSec: '300'
+      displayName: Publish SonarCloud result
+  - job: scan_whitesource_ehubb_services
+    variables:
+      - group: WhiteSource
+    displayName: scan_whitesource_ehubb_services
+    timeoutInMinutes: 120
+    pool:
+     vmImage: 'ubuntu-latest'
+    steps:
+    - script: wget https://github.com/whitesource/unified-agent-distribution/releases/latest/download/wss-unified-agent.jar
+      displayName: Download WhiteSource Unified Agent
+    - task: DownloadPipelineArtifact@2
+      displayName: Download EHubb OS prod artifact
+      inputs:
+        source: current
+        artifact: $(BUILT_1)
+        path: $(Build.BinariesDirectory)
+    - script: cd $(Build.BinariesDirectory) && java -jar $(Build.SourcesDirectory)/wss-unified-agent.jar -c $(Build.SourcesDirectory)/ci/wss-unified-agent.config \
+                 -apiKey $(apiKey) -userKey $(userKey) \
+                 -scanComment "Azure DevOps Pipelines scan"
+      displayName: Scan using WhiteSource Agent
+
+- stage: test_ehubb_services
+  dependsOn: build_ehubb_services
+  jobs: 
+  - job: test_ehubb_services_systemapi
+    displayName: test_ehubb_services_systemapi
+    timeoutInMinutes: 120
+    pool:
+        name: 'DevOps_Austin'
+        demands:
+          - agent.os -equals Linux
+    steps:
+    - script: docker build --build-arg BUILD_PROJ=src/Hubbell.EHubb.UnitTest.SystemAPI/Hubbell.EHubb.UnitTests -t ehubb-services-test:$(Build.BuildNumber) -f ci/Dockerfile.ehubb-services-test .
+      displayName: Build code in docker
+    - script: docker create ehubb-services-test:$(Build.BuildNumber) > ehubb-services-test.cid && cat ehubb-services-test.cid
+      displayName: Extract container ID
+    - script: mkdir test-output
+      displayName: Create output directory to local disk
+    - script: docker cp $(cat ehubb-services-test.cid):/source/results/. results-output
+      displayName: Copy build artifacts to results
+    - task: PublishTestResults@2
+      displayName: Publish test results
+      inputs:
+        testRunner: VSTest
+        testResultsFiles: 'results-output/*.trx'
+        failTaskOnFailedTests: true
+    - task: PublishBuildArtifacts@1
+      displayName: Upload artifacts
+      inputs:
+        pathtoPublish: results-output
+        Parallel: true
+        ParallelCount: 8
+        artifactName: '$(TEST_1)'
+
+- stage: deploy_ehubb_services
+  dependsOn: [ build_ehubb_services, test_ehubb_services ]
+  jobs:
+  - deployment: deploy_ehubb_services_dev
+    displayName: deploy_ehubb_services_dev
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    environment:
+      name:  'EnterpriseHubb Development'
+      resourceType: VirtualMachine
+      tags: dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: sudo rm -rf /usr/lib/EnterpriseHubb/Services/*
+            displayName: Remove previous deployment files from web server directory
+          - task: DownloadBuildArtifacts@0
+            displayName: Download new deployment files (1/2)
+            inputs:
+              buildType: current
+              artifactName: '$(BUILT_1)'
+              downloadPath: $(Pipeline.Workspace)
+          - task: DownloadBuildArtifacts@0
+            displayName: Download new deployment files (2/2)
+            inputs:
+              buildType: current
+              artifactName: '$(BUILT_3)'
+              downloadPath: $(Pipeline.Workspace)
+              itemPattern: 'packaging/'
+          - script: sudo cp -Rv $(Pipeline.Workspace)/$(BUILT_1)/* /lib/EnterpriseHubb/Services
+            displayName: Copy new deployment files into services directory
+          - script: sudo chown developer:developer -vR /lib/EnterpriseHubb/Services/*
+            displayName: Change permissions of new deployment files
+          - script: sudo cp -Rv $(Pipeline.Workspace)/$(BUILT_3)/packaging/*.service /lib/systemd/system
+            displayName: Copy new service files into local filesystem
+          - script: sudo systemctl daemon-reload
+            displayName: Reload systemd dameon
+          - script: sudo cp -Rv $(Pipeline.Workspace)/$(BUILT_3)/packaging/*.site.conf /etc/nginx/sites-available
+            displayName: Copy new Nginx site files into local filesystem
+          - script: sudo ln -sfv /etc/nginx/sites-available/*.site.conf /etc/nginx/sites-enabled/
+            displayName: Link new Nginx site configurations
+          - script: sudo systemctl restart nginx
+            displayName: Restart Nginx web server
+          - script: for s in /lib/systemd/system/ehubb-*.service; do sudo systemctl enable $s; done 
+            displayName: Enable all EnterpriseHubb services
+          - script: for s in /lib/systemd/system/ehubb-*.service; do sudo systemctl restart `basename $s`; done
+            displayName: Restart all EnterpriseHubb services
+          - script: for s in /lib/systemd/system/ehubb-*.service; do sudo systemctl status `basename $s`; done
+            displayName: Show status of all EnterpriseHubb services
+          - script: sudo systemctl status nginx || true
+            displayName: Show status of Nginx service
